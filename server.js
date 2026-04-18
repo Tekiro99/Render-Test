@@ -190,6 +190,7 @@ function createPlayer(socket, payload = {}) {
     attackTimer: 0,
     abilityTimer: 0,
     interactTimer: 0,
+    respawnTimer: 0,
     buffs: {},
     inventory: Array(16).fill(null),
     equipment: { weapon: null, armor: null, boots: null },
@@ -259,10 +260,25 @@ function pushMessage(lobby, text) {
 }
 
 function respawnPlayer(p) {
+  if (p.respawnTimer > 0) return;
   p.hp = p.maxHp;
   p.x = TOWN.x + rand(-100, 100);
   p.y = TOWN.y + rand(-100, 100);
   p.vx = 0; p.vy = 0;
+  p.respawnTimer = 0;
+}
+
+function killPlayer(lobby, player, killerName = "враг") {
+  if (player.hp <= 0 || player.respawnTimer > 0) return;
+  player.hp = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.attackTimer = 0;
+  player.abilityTimer = 0;
+  player.interactTimer = 0;
+  player.respawnTimer = 2.2;
+  addEffect(lobby, { type: "death", x: player.x, y: player.y, duration: 0.6, ownerId: player.id });
+  void killerName;
 }
 
 function spawnMob(lobby, type, x, y) {
@@ -417,6 +433,7 @@ function damageMob(lobby, mob, amount, killer) {
 }
 
 function playerAttack(player, lobby, aim) {
+  if (player.hp <= 0 || player.respawnTimer > 0) return;
   if (player.attackTimer > 0) return;
   const cls = CLASSES[player.cls];
   player.attackTimer = player.attackCd;
@@ -461,6 +478,7 @@ function playerAttack(player, lobby, aim) {
 }
 
 function playerAbility(player, lobby, aim) {
+  if (player.hp <= 0 || player.respawnTimer > 0) return;
   if (player.abilityTimer > 0) return;
   const cls = CLASSES[player.cls];
   const ab = cls.ability;
@@ -506,6 +524,7 @@ function playerAbility(player, lobby, aim) {
 }
 
 function useItem(player, slotIndex) {
+  if (player.hp <= 0 || player.respawnTimer > 0) return "Нельзя использовать предметы после смерти.";
   const slot = player.inventory[slotIndex];
   if (!slot) return "Слот пуст.";
   const def = ITEMS[slot.key];
@@ -582,6 +601,13 @@ function updateLobby(lobby, dt) {
   for (const pid of lobby.players) {
     const p = players.get(pid);
     if (!p) continue;
+    if (p.respawnTimer > 0) {
+      p.respawnTimer = Math.max(0, p.respawnTimer - dt);
+      p.vx = 0;
+      p.vy = 0;
+      if (p.respawnTimer === 0) respawnPlayer(p);
+      continue;
+    }
     if (p.attackTimer > 0) p.attackTimer = Math.max(0, p.attackTimer - dt);
     if (p.abilityTimer > 0) p.abilityTimer = Math.max(0, p.abilityTimer - dt);
     if (p.interactTimer > 0) p.interactTimer = Math.max(0, p.interactTimer - dt);
@@ -624,6 +650,7 @@ function updateLobby(lobby, dt) {
           target.hp -= mob.damage;
           mob.attackTimer = 1.0;
           addEffect(lobby, { type: "hit", x: target.x, y: target.y, duration: 0.35 });
+          if (target.hp <= 0) killPlayer(lobby, target, mob.name);
           if (target.hp <= 0) {
             const lost = Math.min(25, Math.floor(target.coins * 0.1));
             target.coins -= lost;
@@ -816,6 +843,7 @@ io.on("connection", (socket) => {
   socket.on("player:input", (payload) => {
     const p = players.get(socket.id);
     if (!p) return;
+    if (p.hp <= 0 || p.respawnTimer > 0) return;
     const nx = Number(payload?.x), ny = Number(payload?.y);
     if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
     p.x = clamp(nx, 30, MAP.width - 30);
@@ -848,7 +876,7 @@ io.on("connection", (socket) => {
     const p = players.get(socket.id);
     const code = playerLobby.get(socket.id);
     const lobby = code && lobbies.get(code);
-    if (!p || !lobby || p.interactTimer > 0) return;
+    if (!p || !lobby || p.interactTimer > 0 || p.hp <= 0 || p.respawnTimer > 0) return;
     p.interactTimer = 0.35;
     socket.emit("actionResult", tryMine(p, lobby));
   });
@@ -863,7 +891,7 @@ io.on("connection", (socket) => {
 
   socket.on("shop:buy", (key) => {
     const p = players.get(socket.id);
-    if (!p) return;
+    if (!p || p.hp <= 0 || p.respawnTimer > 0) return;
     socket.emit("actionResult", buyItem(p, String(key)));
   });
 
