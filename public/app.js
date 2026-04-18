@@ -26,6 +26,7 @@
 
     keys: {},
     mouse: { x: 0, y: 0, down: false },
+    lastAim: { x: 1, y: 0 },
     lastInputSent: 0,
 
     camera: { x: 0, y: 0, shake: 0 },
@@ -40,6 +41,47 @@
 
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
+  const KEY_CODE_MAP = {
+    KeyW: "move_up",
+    KeyA: "move_left",
+    KeyS: "move_down",
+    KeyD: "move_right",
+    ArrowUp: "move_up",
+    ArrowLeft: "move_left",
+    ArrowDown: "move_down",
+    ArrowRight: "move_right",
+    KeyQ: "ability",
+    KeyE: "interact",
+    KeyI: "inventory",
+    KeyB: "shop",
+    KeyH: "help",
+    Space: "attack",
+  };
+  const KEY_FALLBACK_MAP = {
+    w: "move_up",
+    ц: "move_up",
+    a: "move_left",
+    ф: "move_left",
+    s: "move_down",
+    ы: "move_down",
+    d: "move_right",
+    в: "move_right",
+    arrowup: "move_up",
+    arrowleft: "move_left",
+    arrowdown: "move_down",
+    arrowright: "move_right",
+    q: "ability",
+    й: "ability",
+    e: "interact",
+    у: "interact",
+    i: "inventory",
+    ш: "inventory",
+    b: "shop",
+    и: "shop",
+    h: "help",
+    р: "help",
+    " ": "attack",
+  };
 
   function showScreen(id) {
     $$(".screen").forEach((e) => e.classList.remove("active"));
@@ -128,6 +170,11 @@
   window.addEventListener("resize", resizeCanvas);
 
   // ========= input =========
+  function getInputKey(e) {
+    const key = typeof e.key === "string" ? e.key.toLowerCase() : "";
+    return KEY_CODE_MAP[e.code] || KEY_FALLBACK_MAP[key] || key;
+  }
+
   window.addEventListener("keydown", (e) => {
     if (S.chatActive) {
       if (e.key === "Enter") {
@@ -138,19 +185,20 @@
       } else if (e.key === "Escape") toggleChat(false);
       return;
     }
-    S.keys[e.key.toLowerCase()] = true;
+    const inputKey = getInputKey(e);
+    S.keys[inputKey] = true;
     if (e.key === "Enter") { toggleChat(true); e.preventDefault(); return; }
     if (!S.inLobby) return;
-    if (e.key.toLowerCase() === "e") socket.emit("player:interact");
-    if (e.key === " ") { e.preventDefault(); doAttack(); }
-    if (e.key.toLowerCase() === "q") doAbility();
-    if (e.key.toLowerCase() === "i") togglePanel("inv");
-    if (e.key.toLowerCase() === "b") togglePanel("shop");
-    if (e.key.toLowerCase() === "h") $("#helpOverlay").classList.toggle("hidden");
+    if (inputKey === "interact") socket.emit("player:interact");
+    if (inputKey === "attack") { e.preventDefault(); doAttack(); }
+    if (inputKey === "ability") doAbility();
+    if (inputKey === "inventory") togglePanel("inv");
+    if (inputKey === "shop") togglePanel("shop");
+    if (inputKey === "help") $("#helpOverlay").classList.toggle("hidden");
     if (/^[1-4]$/.test(e.key)) socket.emit("inventory:use", parseInt(e.key, 10) - 1);
     if (e.key === "Escape") $("#helpOverlay").classList.add("hidden");
   });
-  window.addEventListener("keyup", (e) => { S.keys[e.key.toLowerCase()] = false; });
+  window.addEventListener("keyup", (e) => { S.keys[getInputKey(e)] = false; });
 
   canvas.addEventListener("mousemove", (e) => {
     const r = canvas.getBoundingClientRect();
@@ -168,8 +216,11 @@
   function getAim() {
     const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
     const dx = S.mouse.x - cx, dy = S.mouse.y - cy;
-    const m = Math.max(1, Math.hypot(dx, dy));
-    return { x: dx / m, y: dy / m };
+    const m = Math.hypot(dx, dy);
+    const deadzone = Math.max(1, S.self?.radius || findSelfInSnapshot()?.radius || 20);
+    if (m <= deadzone) return S.lastAim;
+    S.lastAim = { x: dx / m, y: dy / m };
+    return S.lastAim;
   }
   function doAttack() { if (S.inLobby) socket.emit("player:attack", getAim()); }
   function doAbility() { if (S.inLobby) socket.emit("player:ability", getAim()); }
@@ -274,10 +325,10 @@
     if (S.inLobby && S.self) {
       const speed = S.self.speed || 220;
       let ix = 0, iy = 0;
-      if (S.keys["w"] || S.keys["arrowup"]) iy -= 1;
-      if (S.keys["s"] || S.keys["arrowdown"]) iy += 1;
-      if (S.keys["a"] || S.keys["arrowleft"]) ix -= 1;
-      if (S.keys["d"] || S.keys["arrowright"]) ix += 1;
+      if (S.keys.move_up) iy -= 1;
+      if (S.keys.move_down) iy += 1;
+      if (S.keys.move_left) ix -= 1;
+      if (S.keys.move_right) ix += 1;
       const m = Math.hypot(ix, iy);
       if (m > 0) { ix /= m; iy /= m; }
       S.vel.x = ix * speed; S.vel.y = iy * speed;

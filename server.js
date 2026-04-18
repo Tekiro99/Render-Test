@@ -726,6 +726,7 @@ function sendSelfState(socket, p) {
     id: p.id, name: p.name, cls: p.cls,
     hp: p.hp, maxHp: p.maxHp, level: p.level, xp: p.xp, xpNeeded: p.xpNeeded,
     coins: p.coins, damage: p.damage, speed: p.speed, range: p.range,
+    radius: p.radius,
     attackCd: p.attackCd, attackTimer: p.attackTimer,
     abilityTimer: p.abilityTimer, abilityCd: CLASSES[p.cls].ability.cd,
     inventory: p.inventory, equipment: p.equipment,
