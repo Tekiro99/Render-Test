@@ -89,6 +89,10 @@ function resizeCanvas() {
   ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
 }
 
+function focusGame() {
+  canvas.focus({ preventScroll: true });
+}
+
 function showToast(message) {
   refs.toast.textContent = message;
   refs.toast.style.opacity = "1";
@@ -425,12 +429,14 @@ function render(now = performance.now()) {
 refs.createLobbyBtn.addEventListener("click", () => {
   ensureReady(() => {
     socket.emit("lobby:create");
+    focusGame();
   });
 });
 
 refs.joinLobbyBtn.addEventListener("click", () => {
   ensureReady(() => {
     socket.emit("lobby:join", refs.joinLobbyInput.value);
+    focusGame();
   });
 });
 
@@ -458,9 +464,12 @@ document.querySelectorAll("[data-shop]").forEach((button) => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+canvas.addEventListener("pointerdown", focusGame);
 
 window.addEventListener("keydown", (event) => {
-  if (document.activeElement.tagName === "INPUT") return;
+  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+    return;
+  }
   if (event.repeat && event.code !== "Space") return;
 
   if (event.code === "KeyW") state.input.up = true;
@@ -521,6 +530,7 @@ socket.on("ready", ({ playerId }) => {
     socket.emit("lobby:join", state.pendingJoinCode);
     state.pendingJoinCode = "";
   }
+  focusGame();
   showToast("Персонаж готов.");
 });
 
