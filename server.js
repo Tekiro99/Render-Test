@@ -7,7 +7,8 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const TICK_RATE = 1000 / 20;
+const SIMULATION_TICK_RATE = 1000 / 30;
+const SNAPSHOT_TICK_RATE = 1000 / 12;
 const MAP = { width: 3200, height: 2200 };
 const TOWN = { x: 360, y: 360, radius: 260 };
 const MINE_NODE = { x: MAP.width / 2, y: MAP.height / 2, radius: 88 };
@@ -460,15 +461,17 @@ io.on("connection", (socket) => {
 let lastTick = Date.now();
 setInterval(() => {
   const now = Date.now();
-  const delta = Math.min(0.05, (now - lastTick) / 1000);
+  const delta = Math.min(0.033, (now - lastTick) / 1000);
   lastTick = now;
   updatePlayers(delta);
   updateEnemies(delta);
+}, SIMULATION_TICK_RATE);
 
+setInterval(() => {
   for (const code of lobbies.keys()) {
     emitLobbyState(code);
   }
-}, TICK_RATE);
+}, SNAPSHOT_TICK_RATE);
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

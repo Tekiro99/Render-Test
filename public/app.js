@@ -42,6 +42,7 @@ const state = {
     enemies: new Map(),
   },
   lastFrameAt: performance.now(),
+  lastUrlLobbyCode: new URLSearchParams(window.location.search).get("lobby") || "",
 };
 
 const LOCAL_PLAYER_SPEED = 220;
@@ -443,10 +444,11 @@ socket.on("state", (payload) => {
   state.players = payload.players;
   state.enemies = payload.enemies;
   pruneRenderState();
-  if (state.lobby?.code) {
+  if (state.lobby?.code && state.lastUrlLobbyCode !== state.lobby.code) {
     const url = new URL(window.location.href);
     url.searchParams.set("lobby", state.lobby.code);
     window.history.replaceState({}, "", url);
+    state.lastUrlLobbyCode = state.lobby.code;
   }
   updateHud();
 });
