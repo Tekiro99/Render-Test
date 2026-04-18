@@ -14,10 +14,13 @@ const TOWN = { x: 360, y: 360, radius: 260 };
 const MINE_NODE = { x: MAP.width / 2, y: MAP.height / 2, radius: 88 };
 const MAX_ENEMIES = 16;
 const PLAYER_SPEED = 220;
+const PICKAXE_PRICES = [40, 75, 120, 180, 260];
+const SWORD_PRICES = [55, 95, 145, 210, 300];
 
 const lobbies = new Map();
 const players = new Map();
 const playerLobby = new Map();
+
 function randomCode(length = 6) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
@@ -25,6 +28,44 @@ function randomCode(length = 6) {
     code += chars[Math.floor(Math.random() * chars.length)];
   }
   return code;
+}
+
+function sanitizeProfile(payload = {}) {
+  return {
+    name: String(payload.name || "Игрок").slice(0, 18),
+    appearance: {
+      body: typeof payload.body === "string" ? payload.body : "#f0efe9",
+      accent: typeof payload.accent === "string" ? payload.accent : "#2a9d8f",
+      eyes: typeof payload.eyes === "string" ? payload.eyes : "#1d3557",
+    },
+  };
+}
+
+function createPlayer(socket, payload = {}) {
+  const profile = sanitizeProfile(payload);
+  return {
+    id: socket.id,
+    name: profile.name,
+    x: TOWN.x + Math.random() * 120 - 60,
+    y: TOWN.y + Math.random() * 120 - 60,
+    vx: 0,
+    vy: 0,
+    speed: PLAYER_SPEED,
+    radius: 18,
+    hp: 100,
+    maxHp: 100,
+    coins: 0,
+    miningReward: 6,
+    damage: 12,
+    attackCooldown: 0,
+    interactCooldown: 0,
+    inventory: {
+      pickaxeLevel: 0,
+      swordLevel: 0,
+    },
+    appearance: profile.appearance,
+    lastMoveAt: Date.now(),
+  };
 }
 
 function createLobby(hostId) {
@@ -45,122 +86,9 @@ function createLobby(hostId) {
   return lobby;
 }
 
-function createPlayer(socket, payload = {}) {
-  const colors = ["#f0efe9", "#1d3557", "#d62828", "#2a9d8f", "#e9c46a"];
-  return {
-    id: socket.id,
-    name: String(payload.name || "Игрок").slice(0, 18),
-    x: TOWN.x + Math.random() * 120 - 60,
-    y: TOWN.y + Math.random() * 120 - 60,
-    vx: 0,
-    vy: 0,
-    speed: PLAYER_SPEED,
-    radius: 18,
-    facing: "down",
-    hp: 100,
-    maxHp: 100,
-    coins: 0,
-    baseMiningReward: 6,
-    baseDamage: 12,
-    miningReward: 6,
-    damage: 12,
-    attackCooldown: 0,
-    interactCooldown: 0,
-    inventory: {
-      pickaxe: false,
-      sword: false,
-    },
-    appearance: {
-      body: payload.body || colors[0],
-      accent: payload.accent || colors[3],
-      eyes: payload.eyes || colors[1],
-    },
-    input: {
-      up: false,
-      down: false,
-      left: false,
-      right: false,
-    },
-    lastMoveAt: Date.now(),
-  };
-}
-
-function sanitizeProfile(payload = {}) {
-  const colors = ["#f0efe9", "#2a9d8f", "#1d3557"];
-  const fallback = {
-    body: colors[0],
-    accent: colors[1],
-    eyes: colors[2],
-  };
-
-  return {
-    name: String(payload.name || "Игрок").slice(0, 18),
-    appearance: {
-      body: typeof payload.body === "string" ? payload.body : fallback.body,
-      accent: typeof payload.accent === "string" ? payload.accent : fallback.accent,
-      eyes: typeof payload.eyes === "string" ? payload.eyes : fallback.eyes,
-    },
-  };
-}
-
 function getLobby(code) {
   if (!code) return null;
   return lobbies.get(String(code).trim().toUpperCase()) || null;
-}
-
-function addPlayerToLobby(playerId, code) {
-  const lobby = getLobby(code);
-  const player = players.get(playerId);
-  if (!lobby || !player) {
-    return { ok: false, message: "Лобби не найдено." };
-  }
-
-  const oldCode = playerLobby.get(playerId);
-  if (oldCode && lobbies.has(oldCode)) {
-    const oldLobby = lobbies.get(oldCode);
-    oldLobby.players.delete(playerId);
-    io.to(oldCode).emit("systemMessage", `${player.name} покинул лобби.`);
-    cleanupLobby(oldLobby);
-  }
-
-  lobby.players.add(playerId);
-  playerLobby.set(playerId, lobby.code);
-  player.x = TOWN.x + Math.random() * 150 - 75;
-  player.y = TOWN.y + Math.random() * 150 - 75;
-
-  if (lobby.enemies.length === 0) {
-    spawnEnemies(lobby);
-  }
-
-  return { ok: true, lobby };
-}
-
-function cleanupLobby(lobby) {
-  if (!lobby) return;
-  if (lobby.players.size === 0) {
-    lobbies.delete(lobby.code);
-    return;
-  }
-
-  if (!lobby.players.has(lobby.hostId)) {
-    lobby.hostId = Array.from(lobby.players)[0];
-  }
-}
-
-function spawnEnemies(lobby) {
-  lobby.enemies = Array.from({ length: MAX_ENEMIES }, (_, index) => ({
-    id: `enemy-${index}-${Date.now()}`,
-    x: 900 + Math.random() * 1800,
-    y: 600 + Math.random() * 1200,
-    radius: 20,
-    hp: 50,
-    maxHp: 50,
-    damage: 10,
-    speed: 100 + Math.random() * 25,
-    cooldown: 0,
-    targetId: null,
-    respawnAt: 0,
-  }));
 }
 
 function clamp(value, min, max) {
@@ -183,13 +111,82 @@ function respawnPlayer(player) {
   player.hp = player.maxHp;
   player.x = TOWN.x + Math.random() * 150 - 75;
   player.y = TOWN.y + Math.random() * 150 - 75;
+  player.vx = 0;
+  player.vy = 0;
+}
+
+function spawnEnemies(lobby) {
+  lobby.enemies = Array.from({ length: MAX_ENEMIES }, (_, index) => {
+    const elite = index % 5 === 0;
+    return {
+      id: `enemy-${index}-${Date.now()}`,
+      x: 900 + Math.random() * 1800,
+      y: 600 + Math.random() * 1200,
+      vx: 0,
+      vy: 0,
+      radius: elite ? 28 : 20,
+      hp: elite ? 250 : 50,
+      maxHp: elite ? 250 : 50,
+      damage: elite ? 18 : 10,
+      speed: elite ? 120 : 100 + Math.random() * 25,
+      cooldown: 0,
+      respawnAt: 0,
+      elite,
+      name: elite ? "Elite Monster" : "Monster",
+    };
+  });
+}
+
+function cleanupLobby(lobby) {
+  if (!lobby) return;
+  if (lobby.players.size === 0) {
+    lobbies.delete(lobby.code);
+    return;
+  }
+
+  if (!lobby.players.has(lobby.hostId)) {
+    lobby.hostId = Array.from(lobby.players)[0];
+  }
+}
+
+function addPlayerToLobby(playerId, code) {
+  const lobby = getLobby(code);
+  const player = players.get(playerId);
+  if (!lobby || !player) {
+    return { ok: false, message: "Лобби не найдено." };
+  }
+
+  const oldCode = playerLobby.get(playerId);
+  if (oldCode && lobbies.has(oldCode)) {
+    const oldLobby = lobbies.get(oldCode);
+    oldLobby.players.delete(playerId);
+    cleanupLobby(oldLobby);
+  }
+
+  lobby.players.add(playerId);
+  playerLobby.set(playerId, lobby.code);
+  respawnPlayer(player);
+
+  if (lobby.enemies.length === 0) {
+    spawnEnemies(lobby);
+  }
+
+  return { ok: true, lobby };
+}
+
+function lobbyMessage(code, message) {
+  const lobby = getLobby(code);
+  if (!lobby) return;
+  lobby.messages.unshift(message);
+  lobby.messages = lobby.messages.slice(0, 8);
+  io.to(code).emit("messages", lobby.messages);
 }
 
 function emitLobbyState(code) {
   const lobby = getLobby(code);
   if (!lobby) return;
 
-  const payload = {
+  io.to(code).emit("state", {
     lobby: {
       code: lobby.code,
       hostId: lobby.hostId,
@@ -199,8 +196,8 @@ function emitLobbyState(code) {
     town: TOWN,
     mineNode: MINE_NODE,
     shop: {
-      pickaxe: { price: 40, name: "Кирка" },
-      sword: { price: 55, name: "Меч" },
+      pickaxe: { prices: PICKAXE_PRICES, maxLevel: 5, name: "Pickaxe" },
+      sword: { prices: SWORD_PRICES, maxLevel: 5, name: "Sword" },
     },
     players: Array.from(lobby.players)
       .map((id) => players.get(id))
@@ -214,7 +211,7 @@ function emitLobbyState(code) {
         vy: player.vy,
         speed: player.speed,
         radius: player.radius,
-        hp: player.hp,
+        hp: Math.round(player.hp),
         maxHp: player.maxHp,
         coins: player.coins,
         appearance: player.appearance,
@@ -224,23 +221,17 @@ function emitLobbyState(code) {
       .filter((enemy) => enemy.respawnAt === 0)
       .map((enemy) => ({
         id: enemy.id,
+        name: enemy.name,
         x: enemy.x,
         y: enemy.y,
+        vx: enemy.vx,
+        vy: enemy.vy,
         radius: enemy.radius,
         hp: enemy.hp,
         maxHp: enemy.maxHp,
+        elite: enemy.elite,
       })),
-  };
-
-  io.to(code).emit("state", payload);
-}
-
-function lobbyMessage(code, message) {
-  const lobby = getLobby(code);
-  if (!lobby) return;
-  lobby.messages.unshift(message);
-  lobby.messages = lobby.messages.slice(0, 8);
-  io.to(code).emit("messages", lobby.messages);
+  });
 }
 
 function tryMine(player) {
@@ -259,30 +250,30 @@ function tryBuy(player, item) {
   }
 
   if (item === "pickaxe") {
-    if (player.inventory.pickaxe) return "Кирка уже куплена.";
-    if (player.coins < 40) return "Недостаточно попскойнов для кирки.";
-    player.coins -= 40;
-    player.inventory.pickaxe = true;
-    player.miningReward = 12;
-    return "Кирка куплена. Добыча усилена.";
+    if (player.inventory.pickaxeLevel >= 5) return "Кирка уже улучшена до 5 уровня.";
+    const price = PICKAXE_PRICES[player.inventory.pickaxeLevel];
+    if (player.coins < price) return "Недостаточно попскойнов для улучшения кирки.";
+    player.coins -= price;
+    player.inventory.pickaxeLevel += 1;
+    player.miningReward = 6 + player.inventory.pickaxeLevel * 6;
+    return `Кирка улучшена до ${player.inventory.pickaxeLevel} уровня.`;
   }
 
   if (item === "sword") {
-    if (player.inventory.sword) return "Меч уже куплен.";
-    if (player.coins < 55) return "Недостаточно попскойнов для меча.";
-    player.coins -= 55;
-    player.inventory.sword = true;
-    player.damage = 24;
-    return "Меч куплен. Урон повышен.";
+    if (player.inventory.swordLevel >= 5) return "Меч уже улучшен до 5 уровня.";
+    const price = SWORD_PRICES[player.inventory.swordLevel];
+    if (player.coins < price) return "Недостаточно попскойнов для улучшения меча.";
+    player.coins -= price;
+    player.inventory.swordLevel += 1;
+    player.damage = 12 + player.inventory.swordLevel * 12;
+    return `Меч улучшен до ${player.inventory.swordLevel} уровня.`;
   }
 
   return "Неизвестный предмет.";
 }
 
 function tryAttack(player, code) {
-  if (player.attackCooldown > 0) {
-    return;
-  }
+  if (player.attackCooldown > 0) return;
 
   const lobby = getLobby(code);
   if (!lobby) return;
@@ -291,17 +282,19 @@ function tryAttack(player, code) {
 
   for (const enemy of lobby.enemies) {
     if (enemy.respawnAt > 0) continue;
-    if (distance(player, enemy) <= 70) {
-      enemy.hp -= player.damage;
-      if (enemy.hp <= 0) {
-        enemy.respawnAt = 8;
-        enemy.hp = enemy.maxHp;
-        const reward = 14 + Math.floor(Math.random() * 8);
-        player.coins += reward;
-        lobbyMessage(code, `${player.name} победил врага и получил ${reward} попскойнов.`);
-      }
-      return;
+    if (distance(player, enemy) > 72) continue;
+
+    enemy.hp -= player.damage;
+    if (enemy.hp <= 0) {
+      enemy.respawnAt = 8;
+      enemy.hp = enemy.maxHp;
+      enemy.vx = 0;
+      enemy.vy = 0;
+      const reward = enemy.elite ? 55 + Math.floor(Math.random() * 20) : 14 + Math.floor(Math.random() * 8);
+      player.coins += reward;
+      lobbyMessage(code, `${player.name} победил ${enemy.elite ? "элитного монстра" : "врага"} и получил ${reward} попскойнов.`);
     }
+    return;
   }
 }
 
@@ -312,6 +305,9 @@ function updatePlayers(delta) {
     }
     if (player.interactCooldown > 0) {
       player.interactCooldown = Math.max(0, player.interactCooldown - delta);
+    }
+    if (isInsideTown(player) && player.hp < player.maxHp) {
+      player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.01 * delta);
     }
     if (Date.now() - player.lastMoveAt > 180) {
       player.vx = 0;
@@ -328,6 +324,8 @@ function updateEnemies(delta) {
         if (enemy.respawnAt === 0) {
           enemy.x = 900 + Math.random() * 1800;
           enemy.y = 600 + Math.random() * 1200;
+          enemy.vx = 0;
+          enemy.vy = 0;
         }
         continue;
       }
@@ -347,12 +345,17 @@ function updateEnemies(delta) {
 
       if (!nearestPlayer) continue;
 
-      if (nearestDistance < 320) {
+      if (nearestDistance < 340) {
         const dx = nearestPlayer.x - enemy.x;
         const dy = nearestPlayer.y - enemy.y;
         const mag = Math.max(1, length(dx, dy));
-        enemy.x = clamp(enemy.x + (dx / mag) * enemy.speed * delta, 20, MAP.width - 20);
-        enemy.y = clamp(enemy.y + (dy / mag) * enemy.speed * delta, 20, MAP.height - 20);
+        enemy.vx = (dx / mag) * enemy.speed;
+        enemy.vy = (dy / mag) * enemy.speed;
+        enemy.x = clamp(enemy.x + enemy.vx * delta, 20, MAP.width - 20);
+        enemy.y = clamp(enemy.y + enemy.vy * delta, 20, MAP.height - 20);
+      } else {
+        enemy.vx = 0;
+        enemy.vy = 0;
       }
 
       if (enemy.cooldown > 0) {
@@ -395,11 +398,8 @@ io.on("connection", (socket) => {
     const profile = sanitizeProfile(payload);
     player.name = profile.name;
     player.appearance = profile.appearance;
-
     const code = playerLobby.get(socket.id);
-    if (code) {
-      emitLobbyState(code);
-    }
+    if (code) emitLobbyState(code);
   });
 
   socket.on("lobby:create", () => {
@@ -458,12 +458,9 @@ io.on("connection", (socket) => {
   socket.on("player:interact", () => {
     const player = players.get(socket.id);
     const code = playerLobby.get(socket.id);
-    if (!player || !code) return;
-    if (player.interactCooldown > 0) return;
+    if (!player || !code || player.interactCooldown > 0) return;
     player.interactCooldown = 0.35;
-
-    const result = tryMine(player);
-    socket.emit("actionResult", result);
+    socket.emit("actionResult", tryMine(player));
     emitLobbyState(code);
   });
 
@@ -479,8 +476,7 @@ io.on("connection", (socket) => {
     const player = players.get(socket.id);
     const code = playerLobby.get(socket.id);
     if (!player || !code) return;
-    const result = tryBuy(player, item);
-    socket.emit("actionResult", result);
+    socket.emit("actionResult", tryBuy(player, item));
     emitLobbyState(code);
   });
 

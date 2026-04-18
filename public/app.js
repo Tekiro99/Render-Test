@@ -18,12 +18,14 @@ const refs = {
   playersValue: document.getElementById("playersValue"),
   toast: document.getElementById("toast"),
   messages: document.getElementById("messages"),
+  shopButtons: Array.from(document.querySelectorAll("[data-shop]")),
 };
 
 const state = {
   ready: false,
   selfId: null,
   lobby: null,
+  shop: null,
   map: { width: 3200, height: 2200 },
   town: { x: 360, y: 360, radius: 260 },
   mineNode: { x: 1600, y: 1100, radius: 88 },
@@ -122,19 +124,17 @@ function getEnemyRender(enemy) {
 }
 
 function pruneRenderState() {
-  const playerIds = new Set(state.players.filter((player) => player.id !== state.selfId).map((player) => player.id));
+  const playerIds = new Set(
+    state.players.filter((player) => player.id !== state.selfId).map((player) => player.id),
+  );
   const enemyIds = new Set(state.enemies.map((enemy) => enemy.id));
 
   for (const id of state.remoteRender.players.keys()) {
-    if (!playerIds.has(id)) {
-      state.remoteRender.players.delete(id);
-    }
+    if (!playerIds.has(id)) state.remoteRender.players.delete(id);
   }
 
   for (const id of state.remoteRender.enemies.keys()) {
-    if (!enemyIds.has(id)) {
-      state.remoteRender.enemies.delete(id);
-    }
+    if (!enemyIds.has(id)) state.remoteRender.enemies.delete(id);
   }
 }
 
@@ -148,6 +148,26 @@ function renderMessages(messages = []) {
   });
 }
 
+function updateShopButtons() {
+  const self = selfPlayer();
+  refs.shopButtons.forEach((button) => {
+    if (!self || !state.shop) return;
+    const item = button.dataset.shop;
+    const config = state.shop[item];
+    if (!config) return;
+    const levelKey = item === "pickaxe" ? "pickaxeLevel" : "swordLevel";
+    const label = item === "pickaxe" ? "Кирка" : "Меч";
+    const level = self.inventory[levelKey] || 0;
+
+    if (level >= config.maxLevel) {
+      button.textContent = `${label} · ур. ${level}/5 · MAX`;
+      return;
+    }
+
+    button.textContent = `${label} · ур. ${level}/5 · ${config.prices[level]}`;
+  });
+}
+
 function updateHud() {
   const self = selfPlayer();
   refs.playersValue.textContent = String(state.players.length);
@@ -156,6 +176,7 @@ function updateHud() {
   refs.lobbyInfo.textContent = state.lobby
     ? `Лобби ${state.lobby.code} · Хост ${state.lobby.hostId === state.selfId ? "ты" : "другой игрок"}`
     : "Сначала создай лобби или войди по коду.";
+  updateShopButtons();
 }
 
 function currentInviteLink() {
@@ -166,10 +187,7 @@ function currentInviteLink() {
 }
 
 function worldToScreen(x, y) {
-  return {
-    x: x - state.camera.x,
-    y: y - state.camera.y,
-  };
+  return { x: x - state.camera.x, y: y - state.camera.y };
 }
 
 function updateLocalPlayer(delta) {
@@ -206,14 +224,14 @@ function updateRemoteEntities(delta) {
     const render = getRemotePlayerRender(player);
     render.x += (player.x - render.x) * POSITION_LERP;
     render.y += (player.y - render.y) * POSITION_LERP;
-    render.bob += delta * ((player.vx || player.vy) ? 8 : 3);
+    render.bob += delta * ((Math.abs(player.vx) + Math.abs(player.vy) > 1) ? 8 : 3);
   });
 
   state.enemies.forEach((enemy) => {
     const render = getEnemyRender(enemy);
     render.x += (enemy.x - render.x) * POSITION_LERP;
     render.y += (enemy.y - render.y) * POSITION_LERP;
-    render.bob += delta * 7;
+    render.bob += delta * ((Math.abs(enemy.vx) + Math.abs(enemy.vy) > 1) ? 9 : 4);
   });
 }
 
@@ -318,21 +336,40 @@ function drawMine() {
 function drawEnemy(enemy) {
   const render = getEnemyRender(enemy);
   const pos = worldToScreen(render.x, render.y);
-  const bobOffset = Math.sin(render.bob) * 2.4;
+  const moving = Math.abs(enemy.vx) + Math.abs(enemy.vy) > 1;
+  const bobOffset = Math.sin(render.bob) * (enemy.elite ? 4.2 : 2.6);
+  const pulse = Math.sin(render.bob * 0.7) * (enemy.elite ? 2.8 : 1.4);
 
-  ctx.fillStyle = "#c44536";
+  ctx.fillStyle = enemy.elite ? "#6d1f7a" : "#c44536";
   ctx.beginPath();
-  ctx.arc(pos.x, pos.y + bobOffset, enemy.radius, 0, Math.PI * 2);
+  ctx.arc(pos.x, pos.y + bobOffset, enemy.radius + pulse, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(pos.x - 14, pos.y - 7 + bobOffset, 8, 8);
-  ctx.fillRect(pos.x + 6, pos.y - 7 + bobOffset, 8, 8);
+  ctx.fillStyle = enemy.elite ? "#f7d6ff" : "#fff";
+  ctx.fillRect(pos.x - 14, pos.y - 7 + bobOffset, enemy.elite ? 10 : 8, enemy.elite ? 10 : 8);
+  ctx.fillRect(pos.x + 6, pos.y - 7 + bobOffset, enemy.elite ? 10 : 8, enemy.elite ? 10 : 8);
+
+  ctx.strokeStyle = enemy.elite ? "rgba(247, 214, 255, 0.9)" : "rgba(255,255,255,0.75)";
+  ctx.lineWidth = enemy.elite ? 4 : 3;
+  ctx.beginPath();
+  ctx.moveTo(pos.x - enemy.radius + 3, pos.y + bobOffset + 10);
+  ctx.lineTo(pos.x - enemy.radius - (moving ? 8 : 2), pos.y + bobOffset + 18);
+  ctx.moveTo(pos.x + enemy.radius - 3, pos.y + bobOffset + 10);
+  ctx.lineTo(pos.x + enemy.radius + (moving ? 8 : 2), pos.y + bobOffset + 18);
+  ctx.stroke();
 
   ctx.fillStyle = "rgba(0,0,0,0.18)";
-  ctx.fillRect(pos.x - 20, pos.y - 32 + bobOffset, 40, 6);
-  ctx.fillStyle = "#f4a261";
-  ctx.fillRect(pos.x - 20, pos.y - 32 + bobOffset, (enemy.hp / enemy.maxHp) * 40, 6);
+  ctx.fillRect(pos.x - 24, pos.y - 36 + bobOffset, 48, 7);
+  ctx.fillStyle = enemy.elite ? "#f284ff" : "#f4a261";
+  ctx.fillRect(pos.x - 24, pos.y - 36 + bobOffset, (enemy.hp / enemy.maxHp) * 48, 7);
+
+  if (enemy.elite) {
+    ctx.fillStyle = "#34113f";
+    ctx.font = "12px Segoe UI";
+    ctx.textAlign = "center";
+    ctx.fillText("ELITE", pos.x, pos.y - enemy.radius - 18 + bobOffset);
+    ctx.textAlign = "start";
+  }
 }
 
 function drawPlayer(player) {
@@ -360,14 +397,14 @@ function drawPlayer(player) {
   ctx.arc(pos.x + 6, pos.y - 3 + bobOffset, 2.5, 0, Math.PI * 2);
   ctx.fill();
 
-  if (player.inventory.sword) {
+  if (player.inventory.swordLevel) {
     ctx.fillStyle = "#182126";
-    ctx.fillRect(pos.x + 16, pos.y - 16 + bobOffset, 5, 24);
+    ctx.fillRect(pos.x + 16, pos.y - 16 + bobOffset, 4 + player.inventory.swordLevel, 24);
   }
 
-  if (player.inventory.pickaxe) {
+  if (player.inventory.pickaxeLevel) {
     ctx.strokeStyle = "#7f5539";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2 + player.inventory.pickaxeLevel * 0.4;
     ctx.beginPath();
     ctx.moveTo(pos.x - 18, pos.y + 14 + bobOffset);
     ctx.lineTo(pos.x - 28, pos.y - 12 + bobOffset);
@@ -394,15 +431,15 @@ function drawHints() {
   const inTown = Math.hypot(self.x - state.town.x, self.y - state.town.y) < state.town.radius;
 
   ctx.fillStyle = "rgba(255, 250, 240, 0.88)";
-  ctx.fillRect(18, canvas.clientHeight - 74, 340, 46);
+  ctx.fillRect(18, canvas.clientHeight - 74, 420, 46);
   ctx.fillStyle = "#182126";
   ctx.font = "15px Segoe UI";
   ctx.fillText(
     nearMine
       ? "Нажми E, чтобы добыть попскойны."
       : inTown
-        ? "Ты в городе. Кирку и меч можно купить слева."
-        : "Иди к центру карты за ресурсами и врагами.",
+        ? "Ты в городе. Здесь действует реген 1% HP в секунду."
+        : "Обычные и элитные монстры теперь двигаются плавнее.",
     32,
     canvas.clientHeight - 44,
   );
@@ -450,7 +487,7 @@ refs.copyInviteBtn.addEventListener("click", async () => {
   showToast("Ссылка приглашения скопирована.");
 });
 
-document.querySelectorAll("[data-shop]").forEach((button) => {
+refs.shopButtons.forEach((button) => {
   button.addEventListener("click", () => {
     socket.emit("shop:buy", button.dataset.shop);
   });
@@ -467,9 +504,7 @@ window.addEventListener("resize", resizeCanvas);
 canvas.addEventListener("pointerdown", focusGame);
 
 window.addEventListener("keydown", (event) => {
-  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
-    return;
-  }
+  if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
   if (event.repeat && event.code !== "Space") return;
 
   if (event.code === "KeyW") state.input.up = true;
@@ -478,9 +513,7 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyD") state.input.right = true;
   if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) sendMovement(true);
 
-  if (event.code === "KeyE") {
-    socket.emit("player:interact");
-  }
+  if (event.code === "KeyE") socket.emit("player:interact");
 
   if (event.code === "Space") {
     event.preventDefault();
@@ -501,13 +534,11 @@ window.addEventListener("blur", () => {
   state.input.down = false;
   state.input.left = false;
   state.input.right = false;
-
   const self = selfPlayer();
   if (self) {
     self.vx = 0;
     self.vy = 0;
   }
-
   sendMovement(true);
 });
 
@@ -517,9 +548,7 @@ socket.on("connect", () => {
   state.selfId = null;
   state.selfRender = null;
   state.lastMoveSentAt = 0;
-  if (state.pendingJoinCode) {
-    sendInit();
-  }
+  if (state.pendingJoinCode) sendInit();
 });
 
 socket.on("ready", ({ playerId }) => {
@@ -536,6 +565,7 @@ socket.on("ready", ({ playerId }) => {
 
 socket.on("state", (payload) => {
   state.lobby = payload.lobby;
+  state.shop = payload.shop;
   state.map = payload.map;
   state.town = payload.town;
   state.mineNode = payload.mineNode;
