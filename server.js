@@ -25,8 +25,16 @@ const MINE_NODES = [
   { x: 3400, y: 2500, radius: 110, type: "crystal" },
 ];
 const BOSS_ARENA = { x: 3500, y: 1500, radius: 260 };
+const DANGER_ZONES = [
+  { name: "Зелёные луга", danger: 1, x: 1450, y: 900, radius: 520, spawns: [{ type: "slime", count: [7, 9] }, { type: "goblin", count: [2, 3] }] },
+  { name: "Разбойничий тракт", danger: 2, x: 2450, y: 1750, radius: 560, spawns: [{ type: "goblin", count: [6, 8] }, { type: "skeleton", count: [3, 4] }] },
+  { name: "Костяные курганы", danger: 3, x: 1000, y: 2050, radius: 540, spawns: [{ type: "skeleton", count: [7, 9] }, { type: "wraith", count: [2, 3] }] },
+  { name: "Осквернённые руины", danger: 4, x: 3050, y: 2200, radius: 560, spawns: [{ type: "wraith", count: [6, 8] }, { type: "orc", count: [3, 5] }] },
+  { name: "Передовая Стража", danger: 5, x: 3180, y: 980, radius: 520, spawns: [{ type: "orc", count: [7, 9] }, { type: "wraith", count: [4, 5] }] },
+  { name: "Пепельный проход", danger: 5, x: 3600, y: 2450, radius: 440, spawns: [{ type: "orc", count: [5, 7] }, { type: "skeleton", count: [3, 4] }] },
+];
 
-const MAX_MOBS = 28;
+const MAX_MOBS = 46;
 const PROJECTILE_LIFETIME = 1.6;
 
 // ---------- classes ----------
@@ -77,14 +85,14 @@ const MOB_TYPES = {
 };
 
 const BOSS_TEMPLATE = {
-  hp: 1400,
-  dmg: 32,
-  speed: 75,
-  radius: 48,
-  xp: 450,
-  coin: [280, 420],
+  hp: 2200,
+  dmg: 48,
+  speed: 92,
+  radius: 56,
+  xp: 780,
+  coin: [420, 620],
   color: "#ff4b6e",
-  aggro: 700,
+  aggro: 900,
   boss: true,
   name: "Древний страж",
 };
@@ -102,6 +110,11 @@ const ITEMS = {
   armor_1: { name: "Кожаный доспех", kind: "armor", hp: 30, icon: "🛡️", price: 100 },
   armor_2: { name: "Латный доспех", kind: "armor", hp: 80, icon: "🛡️", price: 280 },
   boots_1: { name: "Сапоги странника", kind: "boots", speed: 20, icon: "👢", price: 90 },
+  aegis_king: { name: "Царский бастион", kind: "weapon", dmg: 34, hp: 35, slot: "warrior", icon: "🛡️", price: 0 },
+  astral_staff: { name: "Астральный жезл", kind: "weapon", dmg: 36, slot: "mage", icon: "🌠", price: 0 },
+  shadow_fangs: { name: "Клыки тени", kind: "weapon", dmg: 24, speed: 24, slot: "rogue", icon: "🗡️", price: 0 },
+  guardian_plate: { name: "Панцирь стража", kind: "armor", hp: 150, icon: "🛡", price: 0 },
+  windstride_boots: { name: "Сапоги вихря", kind: "boots", speed: 42, icon: "🥾", price: 0 },
 };
 
 const SHOP_LISTINGS = [
@@ -323,23 +336,25 @@ function spawnBoss(lobby) {
   pushMessage(lobby, `⚠️ ${BOSS_TEMPLATE.name} пробудился!`);
 }
 
+function pickBossReward(killer) {
+  if (killer?.cls === "warrior") return "aegis_king";
+  if (killer?.cls === "mage") return "astral_staff";
+  if (killer?.cls === "rogue") return "shadow_fangs";
+  return ["guardian_plate", "windstride_boots", "aegis_king", "astral_staff", "shadow_fangs"][randi(0, 4)];
+}
+
 function populateLobby(lobby) {
-  const zones = [
-    { x: 1500, y: 900, r: 500, type: "slime" },
-    { x: 2400, y: 1800, r: 550, type: "goblin" },
-    { x: 1000, y: 2000, r: 500, type: "skeleton" },
-    { x: 3000, y: 2200, r: 500, type: "wraith" },
-    { x: 2600, y: 500, r: 400, type: "goblin" },
-  ];
   lobby.mobs = [];
-  for (const z of zones) {
-    const n = 5 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * z.r;
-      const x = clamp(z.x + Math.cos(a) * r, 60, MAP.width - 60);
-      const y = clamp(z.y + Math.sin(a) * r, 60, MAP.height - 60);
-      lobby.mobs.push(spawnMob(lobby, z.type, x, y));
+  for (const zone of DANGER_ZONES) {
+    for (const group of zone.spawns) {
+      const n = randi(group.count[0], group.count[1]);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * zone.radius;
+        const x = clamp(zone.x + Math.cos(a) * r, 60, MAP.width - 60);
+        const y = clamp(zone.y + Math.sin(a) * r, 60, MAP.height - 60);
+        lobby.mobs.push(spawnMob(lobby, group.type, x, y));
+      }
     }
   }
 }
@@ -391,12 +406,17 @@ function gainXp(player, amount) {
   }
 }
 
-function dropLoot(lobby, mob) {
+function dropLoot(lobby, mob, killer) {
   const tpl = mob.boss ? BOSS_TEMPLATE : MOB_TYPES[mob.type];
   const coin = randi(tpl.coin[0], tpl.coin[1]) * (mob.boss ? 1 : 1);
   const drops = [{ kind: "coin", amount: coin }];
   if (mob.boss || Math.random() < 0.25) drops.push({ kind: "item", key: "potion_hp" });
-  if (mob.boss) { drops.push({ kind: "item", key: "armor_2" }); drops.push({ kind: "item", key: "potion_mp" }); }
+  if (mob.boss) {
+    drops.push({ kind: "item", key: "guardian_plate" });
+    drops.push({ kind: "item", key: "windstride_boots" });
+    drops.push({ kind: "item", key: pickBossReward(killer) });
+    drops.push({ kind: "item", key: "potion_mp" });
+  }
   else if (Math.random() < 0.04) drops.push({ kind: "item", key: "potion_mp" });
   for (const d of drops) {
     const angle = Math.random() * Math.PI * 2;
@@ -412,7 +432,7 @@ function dropLoot(lobby, mob) {
 }
 
 function killMob(lobby, mob, killer) {
-  dropLoot(lobby, mob);
+  dropLoot(lobby, mob, killer);
   addEffect(lobby, { type: "death", x: mob.x, y: mob.y, duration: 0.6 });
   if (killer) {
     const tpl = mob.boss ? BOSS_TEMPLATE : MOB_TYPES[mob.type];
@@ -712,10 +732,14 @@ function updateLobby(lobby, dt) {
   }
 
   // mobs respawn to keep population
-  if (lobby.mobs.filter((m) => !m.boss).length < 20) {
-    const types = ["slime", "goblin", "skeleton", "wraith"];
-    const t = types[Math.floor(Math.random() * types.length)];
-    lobby.mobs.push(spawnMob(lobby, t, rand(800, MAP.width - 200), rand(800, MAP.height - 200)));
+  if (lobby.mobs.filter((m) => !m.boss).length < MAX_MOBS) {
+    const zone = DANGER_ZONES[randi(0, DANGER_ZONES.length - 1)];
+    const group = zone.spawns[randi(0, zone.spawns.length - 1)];
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * zone.radius;
+    const x = clamp(zone.x + Math.cos(a) * r, 60, MAP.width - 60);
+    const y = clamp(zone.y + Math.sin(a) * r, 60, MAP.height - 60);
+    lobby.mobs.push(spawnMob(lobby, group.type, x, y));
   }
 }
 
@@ -789,7 +813,7 @@ io.on("connection", (socket) => {
     const p = createPlayer(socket, payload);
     players.set(socket.id, p);
     socket.emit("ready", { id: socket.id, cls: p.cls });
-    socket.emit("static", { map: MAP, town: TOWN, mines: MINE_NODES, bossArena: BOSS_ARENA, classes: CLASSES, items: ITEMS, shop: SHOP_LISTINGS });
+    socket.emit("static", { map: MAP, town: TOWN, mines: MINE_NODES, bossArena: BOSS_ARENA, dangerZones: DANGER_ZONES, classes: CLASSES, items: ITEMS, shop: SHOP_LISTINGS });
   });
 
   socket.on("lobby:list", () => {

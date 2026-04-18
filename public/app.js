@@ -217,7 +217,8 @@
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
   function getAim() {
-    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    const cx = S.pos.x - S.camera.x;
+    const cy = S.pos.y - S.camera.y;
     const dx = S.mouse.x - cx, dy = S.mouse.y - cy;
     const m = Math.hypot(dx, dy);
     const deadzone = Math.max(1, S.self?.radius || findSelfInSnapshot()?.radius || 20);
@@ -336,6 +337,10 @@
     lastUpdate = now;
 
     if (S.inLobby && S.self) {
+      if (S.self.hp <= 0) {
+        S.vel.x = 0;
+        S.vel.y = 0;
+      } else {
       const baseSpeed = S.self.speed || 220;
       const speed = S.keys.sprint ? baseSpeed * 1.55 : baseSpeed;
       let ix = 0, iy = 0;
@@ -363,6 +368,7 @@
         S.facingAngle = Math.atan2(aim.y, aim.x);
         socket.emit("player:input", { x: S.pos.x, y: S.pos.y, vx: S.vel.x, vy: S.vel.y, facing: S.facingAngle });
         S.lastInputSent = now;
+      }
       }
     }
 
@@ -816,6 +822,10 @@
         if (b && Math.hypot(S.pos.x - b.x, S.pos.y - b.y) <= b.radius) zone = "Арена Стража";
         else zone = "Дикие земли";
       }
+    }
+    if (S.static && zone === "Р”РёРєРёРµ Р·РµРјР»Рё") {
+      const dangerZone = (S.static.dangerZones || []).find((z) => Math.hypot(S.pos.x - z.x, S.pos.y - z.y) <= z.radius);
+      if (dangerZone) zone = `${dangerZone.name} · Опасность ${dangerZone.danger}/5`;
     }
     if (zone !== S.zone) {
       S.zone = zone;
