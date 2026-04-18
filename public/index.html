@@ -1,74 +1,165 @@
 <!DOCTYPE html>
 <html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Popscoin Realm</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <div class="shell">
-      <aside class="panel left-panel">
-        <div class="brand">
-          <p class="eyebrow">Realtime Multiplayer</p>
-          <h1>Popscoin Realm</h1>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aetheria · Realm of Heroes</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- Main menu -->
+    <section id="menu" class="screen active">
+      <div class="menu-bg"></div>
+      <div class="menu-inner">
+        <header class="menu-brand">
+          <h1 class="logo">AETHERIA</h1>
+          <p class="tagline">Realm of Heroes · Multiplayer RPG</p>
+        </header>
+
+        <div class="menu-panels">
+          <div class="menu-card hero-card">
+            <h2>Герой</h2>
+            <label class="field">
+              <span>Имя</span>
+              <input id="nameInput" maxlength="16" value="Герой" />
+            </label>
+            <div class="color-row">
+              <label>Тело<input id="bodyColor" type="color" value="#f3e6c4" /></label>
+              <label>Плащ<input id="accentColor" type="color" value="#2a9d8f" /></label>
+              <label>Глаза<input id="eyesColor" type="color" value="#1d3557" /></label>
+            </div>
+            <div id="classGrid" class="class-grid"></div>
+            <div id="classDetails" class="class-details muted">Выбери класс</div>
+          </div>
+
+          <div class="menu-card lobby-card">
+            <h2>Лобби</h2>
+            <div class="btn-row">
+              <button id="createLobbyBtn" class="btn primary">Создать лобби</button>
+              <button id="refreshLobbiesBtn" class="btn ghost">🔄</button>
+            </div>
+            <div class="join-row">
+              <input id="joinLobbyInput" maxlength="8" placeholder="КОД" />
+              <button id="joinLobbyBtn" class="btn">Войти</button>
+            </div>
+            <div class="lobby-list-wrap">
+              <div class="lobby-list-header">Активные лобби</div>
+              <div id="lobbyList" class="lobby-list"></div>
+            </div>
+          </div>
         </div>
 
-        <section class="card">
-          <h2>Персонаж</h2>
-          <label>Имя <input id="nameInput" maxlength="18" value="Игрок" /></label>
-          <div class="editor-grid">
-            <label>Тело <input id="bodyColor" type="color" value="#f0efe9" /></label>
-            <label>Акцент <input id="accentColor" type="color" value="#2a9d8f" /></label>
-            <label>Глаза <input id="eyesColor" type="color" value="#1d3557" /></label>
+        <footer class="menu-foot">
+          <span class="dot" id="connStatus"></span>
+          <span id="connLabel">Подключение...</span>
+        </footer>
+      </div>
+    </section>
+
+    <!-- In-game -->
+    <section id="game" class="screen">
+      <canvas id="gameCanvas"></canvas>
+
+      <!-- HUD top -->
+      <div class="hud-top">
+        <div class="hero-plate">
+          <div class="portrait" id="portrait"></div>
+          <div class="hero-bars">
+            <div class="hero-name"><span id="heroName">Герой</span><span class="lvl" id="heroLvl">1</span></div>
+            <div class="bar hp-bar"><div class="fill" id="hpFill"></div><span id="hpText">100/100</span></div>
+            <div class="bar xp-bar"><div class="fill" id="xpFill"></div><span id="xpText">0/50</span></div>
           </div>
-        </section>
+        </div>
+        <div class="top-right">
+          <div class="resource"><span>🪙</span><strong id="coinsVal">0</strong></div>
+          <div class="resource lobby-chip" id="lobbyChip">—</div>
+          <button class="btn mini" id="copyInviteBtn">📋 Код</button>
+          <button class="btn mini" id="leaveBtn">✕</button>
+        </div>
+      </div>
 
-        <section class="card">
-          <h2>Лобби</h2>
-          <button id="createLobbyBtn">Создать лобби</button>
-          <div class="join-row">
-            <input id="joinLobbyInput" maxlength="8" placeholder="Код лобби" />
-            <button id="joinLobbyBtn">Войти</button>
-          </div>
-          <p class="muted" id="lobbyInfo">Сначала создай лобби или войди по коду.</p>
-          <button id="copyInviteBtn" class="ghost">Копировать приглашение</button>
-        </section>
+      <!-- Minimap -->
+      <canvas id="minimap" width="200" height="150"></canvas>
 
-        <section class="card">
-          <h2>Магазин</h2>
-          <button data-shop="pickaxe">Кирка · 40</button>
-          <button data-shop="sword">Меч · 55</button>
-          <p class="muted">Покупки доступны в городе.</p>
-        </section>
+      <!-- Skill bar -->
+      <div class="skillbar">
+        <div class="skill" id="skillAtk"><span class="key">SPACE</span><span class="icon">⚔️</span><div class="cd" data-cd></div></div>
+        <div class="skill" id="skillAbl"><span class="key">Q</span><span class="icon" id="abilityIcon">✨</span><div class="cd" data-cd></div></div>
+        <div class="slot" data-slot="0"><span class="key">1</span></div>
+        <div class="slot" data-slot="1"><span class="key">2</span></div>
+        <div class="slot" data-slot="2"><span class="key">3</span></div>
+        <div class="slot" data-slot="3"><span class="key">4</span></div>
+      </div>
 
-        <section class="card">
+      <!-- Chat -->
+      <div class="chat" id="chat">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-input-row">
+          <input id="chatInput" placeholder="Enter — чат" maxlength="160" />
+        </div>
+      </div>
+
+      <!-- Inventory panel -->
+      <div class="panel-sidebar" id="invPanel">
+        <h3>Инвентарь <button class="close" data-close="inv">✕</button></h3>
+        <div class="equip-row">
+          <div class="equip-slot" data-eq="weapon"><span>⚔️</span></div>
+          <div class="equip-slot" data-eq="armor"><span>🛡️</span></div>
+          <div class="equip-slot" data-eq="boots"><span>👢</span></div>
+        </div>
+        <div id="invGrid" class="inv-grid"></div>
+        <p class="muted tiny">Клик — использовать/экипировать</p>
+      </div>
+
+      <!-- Shop panel -->
+      <div class="panel-sidebar" id="shopPanel">
+        <h3>Магазин <button class="close" data-close="shop">✕</button></h3>
+        <div id="shopGrid" class="shop-grid"></div>
+        <p class="muted tiny">Доступен в городе</p>
+      </div>
+
+      <!-- Zone label -->
+      <div class="zone-label" id="zoneLabel"></div>
+
+      <!-- Toast -->
+      <div class="toast-area" id="toastArea"></div>
+
+      <!-- Side buttons -->
+      <div class="side-buttons">
+        <button class="btn mini" id="toggleInv">🎒 I</button>
+        <button class="btn mini" id="toggleShop">🏪 B</button>
+        <button class="btn mini" id="helpBtn">? H</button>
+      </div>
+
+      <!-- Help overlay -->
+      <div class="help-overlay hidden" id="helpOverlay">
+        <div class="help-card">
           <h2>Управление</h2>
-          <p class="muted">WASD: движение</p>
-          <p class="muted">E: взаимодействие</p>
-          <p class="muted">Space: атака</p>
-        </section>
-      </aside>
-
-      <main class="game-wrap">
-        <div class="hud">
-          <div class="pill"><span>HP</span><strong id="hpValue">100 / 100</strong></div>
-          <div class="pill"><span>Попскойны</span><strong id="coinsValue">0</strong></div>
-          <div class="pill"><span>Игроки</span><strong id="playersValue">0</strong></div>
+          <ul>
+            <li><b>WASD</b> — движение</li>
+            <li><b>SPACE / ЛКМ</b> — атака (по курсору)</li>
+            <li><b>Q</b> — способность класса</li>
+            <li><b>E</b> — добыча руды / взаимодействие</li>
+            <li><b>1–4</b> — использовать предмет</li>
+            <li><b>I</b> — инвентарь, <b>B</b> — магазин</li>
+            <li><b>Enter</b> — чат</li>
+          </ul>
+          <button class="btn primary" id="closeHelp">Понятно</button>
         </div>
-        <canvas id="gameCanvas" width="1280" height="720" tabindex="0"></canvas>
-        <div class="toast" id="toast">Подключение...</div>
-      </main>
+      </div>
 
-      <aside class="panel right-panel">
-        <section class="card">
-          <h2>События</h2>
-          <div id="messages" class="messages"></div>
-        </section>
-      </aside>
-    </div>
+      <!-- Death overlay -->
+      <div class="death-overlay hidden" id="deathOverlay">
+        <h2>Ты пал</h2>
+        <p>Возрождение...</p>
+      </div>
+    </section>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="/app.js"></script>
-  </body>
-  </html>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
