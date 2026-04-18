@@ -43,13 +43,17 @@ const state = {
   },
   lastFrameAt: performance.now(),
   lastUrlLobbyCode: new URLSearchParams(window.location.search).get("lobby") || "",
+  initSent: false,
+  pendingJoinCode: new URLSearchParams(window.location.search).get("lobby") || "",
+  selfRender: null,
 };
 
-const LOCAL_PLAYER_SPEED = 220;
-const POSITION_LERP = 0.18;
+const POSITION_LERP = 0.16;
 const CAMERA_LERP = 0.12;
+const SELF_CORRECTION_LERP = 0.08;
 
 function sendInit() {
+  state.initSent = true;
   socket.emit("player:init", {
     name: refs.nameInput.value.trim() || "Игрок",
     body: refs.bodyColor.value,
@@ -74,7 +78,36 @@ function selfPlayer() {
   return state.players.find((player) => player.id === state.selfId);
 }
 
+function profilePayload() {
+  return {
+    name: refs.nameInput.value.trim() || "Игрок",
+    body: refs.bodyColor.value,
+    accent: refs.accentColor.value,
+    eyes: refs.eyesColor.value,
+  };
+}
+
+function ensureReady(action) {
+  if (state.ready) {
+    action();
+    return;
+  }
+
+  sendInit();
+  const waitForReady = () => {
+    if (state.ready) {
+      action();
+      return;
+    }
+    requestAnimationFrame(waitForReady);
+  };
+  waitForReady();
+}
+
 function getRenderPlayer(player) {
+  if (player.id === state.selfId && state.selfRender) {
+    return state.selfRender;
+  }
   let renderPlayer = state.entityRender.players.get(player.id);
   if (!renderPlayer) {
     renderPlayer = { x: player.x, y: player.y, bob: Math.random() * Math.PI * 2 };
@@ -113,19 +146,43 @@ function updateRenderState(delta) {
   const inputX = Number(state.input.right) - Number(state.input.left);
   const inputY = Number(state.input.down) - Number(state.input.up);
   const inputMagnitude = Math.hypot(inputX, inputY) || 1;
+  const self = selfPlayer();
 
-  state.players.forEach((player) => {
-    const renderPlayer = getRenderPlayer(player);
-    const isSelf = player.id === state.selfId;
-
-    if (isSelf && (inputX !== 0 || inputY !== 0)) {
-      renderPlayer.x += (inputX / inputMagnitude) * LOCAL_PLAYER_SPEED * delta;
-      renderPlayer.y += (inputY / inputMagnitude) * LOCAL_PLAYER_SPEED * delta;
+  if (self) {
+    if (!state.selfRender) {
+      state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
     }
 
+    if (inputX !== 0 || inputY !== 0) {
+      state.selfRender.x += (inputX / inputMagnitude) * self.speed * delta;
+      state.selfRender.y += (inputY / inputMagnitude) * self.speed * delta;
+    }
+
+    state.selfRender.x = Math.max(30, Math.min(state.map.width - 30, state.selfRender.x));
+    state.selfRender.y = Math.max(30, Math.min(state.map.height - 30, state.selfRender.y));
+
+    const dx = self.x - state.selfRender.x;
+    const dy = self.y - state.selfRender.y;
+    const serverDistance = Math.hypot(dx, dy);
+
+    if (serverDistance > 140) {
+      state.selfRender.x = self.x;
+      state.selfRender.y = self.y;
+    } else if (serverDistance > 10) {
+      state.selfRender.x += dx * SELF_CORRECTION_LERP;
+      state.selfRender.y += dy * SELF_CORRECTION_LERP;
+    }
+
+    state.selfRender.bob += delta * ((inputX || inputY) ? 8 : 3);
+  }
+
+  state.players.forEach((player) => {
+    if (player.id === state.selfId) return;
+
+    const renderPlayer = getRenderPlayer(player);
     renderPlayer.x += (player.x - renderPlayer.x) * POSITION_LERP;
     renderPlayer.y += (player.y - renderPlayer.y) * POSITION_LERP;
-    renderPlayer.bob += delta * ((inputX || inputY || !isSelf) ? 8 : 3);
+    renderPlayer.bob += delta * ((player.vx || player.vy) ? 8 : 3);
   });
 
   state.enemies.forEach((enemy) => {
@@ -366,13 +423,15 @@ function render(now = performance.now()) {
 }
 
 refs.createLobbyBtn.addEventListener("click", () => {
-  if (!state.ready) sendInit();
-  socket.emit("lobby:create");
+  ensureReady(() => {
+    socket.emit("lobby:create");
+  });
 });
 
 refs.joinLobbyBtn.addEventListener("click", () => {
-  if (!state.ready) sendInit();
-  socket.emit("lobby:join", refs.joinLobbyInput.value);
+  ensureReady(() => {
+    socket.emit("lobby:join", refs.joinLobbyInput.value);
+  });
 });
 
 refs.copyInviteBtn.addEventListener("click", async () => {
@@ -388,6 +447,13 @@ refs.copyInviteBtn.addEventListener("click", async () => {
 document.querySelectorAll("[data-shop]").forEach((button) => {
   button.addEventListener("click", () => {
     socket.emit("shop:buy", button.dataset.shop);
+  });
+});
+
+[refs.nameInput, refs.bodyColor, refs.accentColor, refs.eyesColor].forEach((element) => {
+  element.addEventListener("input", () => {
+    if (!state.ready) return;
+    socket.emit("player:updateProfile", profilePayload());
   });
 });
 
@@ -420,18 +486,34 @@ window.addEventListener("keyup", (event) => {
   if (event.code.startsWith("Key")) sendInput();
 });
 
+window.addEventListener("blur", () => {
+  state.input.up = false;
+  state.input.down = false;
+  state.input.left = false;
+  state.input.right = false;
+  if (state.ready) {
+    sendInput();
+  }
+});
+
 socket.on("connect", () => {
   showToast("Подключено к серверу.");
-  sendInit();
+  state.ready = false;
+  state.initSent = false;
+  state.selfId = null;
+  state.selfRender = null;
+  if (state.pendingJoinCode) {
+    sendInit();
+  }
 });
 
 socket.on("ready", ({ playerId }) => {
   state.ready = true;
   state.selfId = playerId;
-  const lobbyCode = new URLSearchParams(window.location.search).get("lobby");
-  if (lobbyCode) {
-    refs.joinLobbyInput.value = lobbyCode.toUpperCase();
-    socket.emit("lobby:join", lobbyCode);
+  if (state.pendingJoinCode) {
+    refs.joinLobbyInput.value = state.pendingJoinCode.toUpperCase();
+    socket.emit("lobby:join", state.pendingJoinCode);
+    state.pendingJoinCode = "";
   }
   showToast("Персонаж готов.");
 });
@@ -444,6 +526,10 @@ socket.on("state", (payload) => {
   state.players = payload.players;
   state.enemies = payload.enemies;
   pruneRenderState();
+  const self = selfPlayer();
+  if (self && !state.selfRender) {
+    state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
+  }
   if (state.lobby?.code && state.lastUrlLobbyCode !== state.lobby.code) {
     const url = new URL(window.location.href);
     url.searchParams.set("lobby", state.lobby.code);

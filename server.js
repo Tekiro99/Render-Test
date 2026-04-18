@@ -13,6 +13,7 @@ const MAP = { width: 3200, height: 2200 };
 const TOWN = { x: 360, y: 360, radius: 260 };
 const MINE_NODE = { x: MAP.width / 2, y: MAP.height / 2, radius: 88 };
 const MAX_ENEMIES = 16;
+const PLAYER_SPEED = 220;
 
 const lobbies = new Map();
 const players = new Map();
@@ -53,7 +54,7 @@ function createPlayer(socket, payload = {}) {
     y: TOWN.y + Math.random() * 120 - 60,
     vx: 0,
     vy: 0,
-    speed: 220,
+    speed: PLAYER_SPEED,
     radius: 18,
     facing: "down",
     hp: 100,
@@ -79,6 +80,24 @@ function createPlayer(socket, payload = {}) {
       down: false,
       left: false,
       right: false,
+    },
+  };
+}
+
+function sanitizeProfile(payload = {}) {
+  const colors = ["#f0efe9", "#2a9d8f", "#1d3557"];
+  const fallback = {
+    body: colors[0],
+    accent: colors[1],
+    eyes: colors[2],
+  };
+
+  return {
+    name: String(payload.name || "Игрок").slice(0, 18),
+    appearance: {
+      body: typeof payload.body === "string" ? payload.body : fallback.body,
+      accent: typeof payload.accent === "string" ? payload.accent : fallback.accent,
+      eyes: typeof payload.eyes === "string" ? payload.eyes : fallback.eyes,
     },
   };
 }
@@ -190,6 +209,9 @@ function emitLobbyState(code) {
         name: player.name,
         x: player.x,
         y: player.y,
+        vx: player.vx,
+        vy: player.vy,
+        speed: player.speed,
         radius: player.radius,
         hp: player.hp,
         maxHp: player.maxHp,
@@ -359,8 +381,30 @@ app.use(express.static("public"));
 
 io.on("connection", (socket) => {
   socket.on("player:init", (payload) => {
+    if (players.has(socket.id)) {
+      const player = players.get(socket.id);
+      const profile = sanitizeProfile(payload);
+      player.name = profile.name;
+      player.appearance = profile.appearance;
+      socket.emit("ready", { playerId: socket.id });
+      return;
+    }
+
     players.set(socket.id, createPlayer(socket, payload));
     socket.emit("ready", { playerId: socket.id });
+  });
+
+  socket.on("player:updateProfile", (payload) => {
+    const player = players.get(socket.id);
+    if (!player) return;
+    const profile = sanitizeProfile(payload);
+    player.name = profile.name;
+    player.appearance = profile.appearance;
+
+    const code = playerLobby.get(socket.id);
+    if (code) {
+      emitLobbyState(code);
+    }
   });
 
   socket.on("lobby:create", () => {
