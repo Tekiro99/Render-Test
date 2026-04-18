@@ -37,29 +37,49 @@ const state = {
   },
   camera: { x: 0, y: 0 },
   lastToastAt: 0,
-  entityRender: {
+  lastFrameAt: performance.now(),
+  lastMoveSentAt: 0,
+  lastUrlLobbyCode: new URLSearchParams(window.location.search).get("lobby") || "",
+  pendingJoinCode: new URLSearchParams(window.location.search).get("lobby") || "",
+  selfRender: null,
+  remoteRender: {
     players: new Map(),
     enemies: new Map(),
   },
-  lastFrameAt: performance.now(),
-  lastUrlLobbyCode: new URLSearchParams(window.location.search).get("lobby") || "",
-  initSent: false,
-  pendingJoinCode: new URLSearchParams(window.location.search).get("lobby") || "",
-  selfRender: null,
 };
 
-const POSITION_LERP = 0.16;
-const CAMERA_LERP = 0.12;
-const SELF_CORRECTION_LERP = 0.08;
+const POSITION_LERP = 0.14;
+const CAMERA_LERP = 0.14;
+const MOVE_SEND_INTERVAL = 1000 / 24;
 
-function sendInit() {
-  state.initSent = true;
-  socket.emit("player:init", {
+function profilePayload() {
+  return {
     name: refs.nameInput.value.trim() || "Игрок",
     body: refs.bodyColor.value,
     accent: refs.accentColor.value,
     eyes: refs.eyesColor.value,
-  });
+  };
+}
+
+function sendInit() {
+  socket.emit("player:init", profilePayload());
+}
+
+function ensureReady(action) {
+  if (state.ready) {
+    action();
+    return;
+  }
+
+  sendInit();
+  const wait = () => {
+    if (state.ready) {
+      action();
+      return;
+    }
+    requestAnimationFrame(wait);
+  };
+  wait();
 }
 
 function resizeCanvas() {
@@ -71,6 +91,7 @@ function resizeCanvas() {
 
 function showToast(message) {
   refs.toast.textContent = message;
+  refs.toast.style.opacity = "1";
   state.lastToastAt = performance.now();
 }
 
@@ -78,118 +99,48 @@ function selfPlayer() {
   return state.players.find((player) => player.id === state.selfId);
 }
 
-function profilePayload() {
-  return {
-    name: refs.nameInput.value.trim() || "Игрок",
-    body: refs.bodyColor.value,
-    accent: refs.accentColor.value,
-    eyes: refs.eyesColor.value,
-  };
+function getRemotePlayerRender(player) {
+  let render = state.remoteRender.players.get(player.id);
+  if (!render) {
+    render = { x: player.x, y: player.y, bob: Math.random() * Math.PI * 2 };
+    state.remoteRender.players.set(player.id, render);
+  }
+  return render;
 }
 
-function ensureReady(action) {
-  if (state.ready) {
-    action();
-    return;
+function getEnemyRender(enemy) {
+  let render = state.remoteRender.enemies.get(enemy.id);
+  if (!render) {
+    render = { x: enemy.x, y: enemy.y, bob: Math.random() * Math.PI * 2 };
+    state.remoteRender.enemies.set(enemy.id, render);
   }
-
-  sendInit();
-  const waitForReady = () => {
-    if (state.ready) {
-      action();
-      return;
-    }
-    requestAnimationFrame(waitForReady);
-  };
-  waitForReady();
-}
-
-function getRenderPlayer(player) {
-  if (player.id === state.selfId && state.selfRender) {
-    return state.selfRender;
-  }
-  let renderPlayer = state.entityRender.players.get(player.id);
-  if (!renderPlayer) {
-    renderPlayer = { x: player.x, y: player.y, bob: Math.random() * Math.PI * 2 };
-    state.entityRender.players.set(player.id, renderPlayer);
-  }
-  return renderPlayer;
-}
-
-function getRenderEnemy(enemy) {
-  let renderEnemy = state.entityRender.enemies.get(enemy.id);
-  if (!renderEnemy) {
-    renderEnemy = { x: enemy.x, y: enemy.y, bob: Math.random() * Math.PI * 2 };
-    state.entityRender.enemies.set(enemy.id, renderEnemy);
-  }
-  return renderEnemy;
+  return render;
 }
 
 function pruneRenderState() {
-  const playerIds = new Set(state.players.map((player) => player.id));
+  const playerIds = new Set(state.players.filter((player) => player.id !== state.selfId).map((player) => player.id));
   const enemyIds = new Set(state.enemies.map((enemy) => enemy.id));
 
-  for (const id of state.entityRender.players.keys()) {
+  for (const id of state.remoteRender.players.keys()) {
     if (!playerIds.has(id)) {
-      state.entityRender.players.delete(id);
+      state.remoteRender.players.delete(id);
     }
   }
 
-  for (const id of state.entityRender.enemies.keys()) {
+  for (const id of state.remoteRender.enemies.keys()) {
     if (!enemyIds.has(id)) {
-      state.entityRender.enemies.delete(id);
+      state.remoteRender.enemies.delete(id);
     }
   }
 }
 
-function updateRenderState(delta) {
-  const inputX = Number(state.input.right) - Number(state.input.left);
-  const inputY = Number(state.input.down) - Number(state.input.up);
-  const inputMagnitude = Math.hypot(inputX, inputY) || 1;
-  const self = selfPlayer();
-
-  if (self) {
-    if (!state.selfRender) {
-      state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
-    }
-
-    if (inputX !== 0 || inputY !== 0) {
-      state.selfRender.x += (inputX / inputMagnitude) * self.speed * delta;
-      state.selfRender.y += (inputY / inputMagnitude) * self.speed * delta;
-    }
-
-    state.selfRender.x = Math.max(30, Math.min(state.map.width - 30, state.selfRender.x));
-    state.selfRender.y = Math.max(30, Math.min(state.map.height - 30, state.selfRender.y));
-
-    const dx = self.x - state.selfRender.x;
-    const dy = self.y - state.selfRender.y;
-    const serverDistance = Math.hypot(dx, dy);
-
-    if (serverDistance > 140) {
-      state.selfRender.x = self.x;
-      state.selfRender.y = self.y;
-    } else if (serverDistance > 10) {
-      state.selfRender.x += dx * SELF_CORRECTION_LERP;
-      state.selfRender.y += dy * SELF_CORRECTION_LERP;
-    }
-
-    state.selfRender.bob += delta * ((inputX || inputY) ? 8 : 3);
-  }
-
-  state.players.forEach((player) => {
-    if (player.id === state.selfId) return;
-
-    const renderPlayer = getRenderPlayer(player);
-    renderPlayer.x += (player.x - renderPlayer.x) * POSITION_LERP;
-    renderPlayer.y += (player.y - renderPlayer.y) * POSITION_LERP;
-    renderPlayer.bob += delta * ((player.vx || player.vy) ? 8 : 3);
-  });
-
-  state.enemies.forEach((enemy) => {
-    const renderEnemy = getRenderEnemy(enemy);
-    renderEnemy.x += (enemy.x - renderEnemy.x) * POSITION_LERP;
-    renderEnemy.y += (enemy.y - renderEnemy.y) * POSITION_LERP;
-    renderEnemy.bob += delta * 7;
+function renderMessages(messages = []) {
+  refs.messages.innerHTML = "";
+  messages.forEach((text) => {
+    const node = document.createElement("div");
+    node.className = "message";
+    node.textContent = text;
+    refs.messages.appendChild(node);
   });
 }
 
@@ -210,20 +161,6 @@ function currentInviteLink() {
   return url.toString();
 }
 
-function renderMessages(messages = []) {
-  refs.messages.innerHTML = "";
-  messages.forEach((text) => {
-    const node = document.createElement("div");
-    node.className = "message";
-    node.textContent = text;
-    refs.messages.appendChild(node);
-  });
-}
-
-function sendInput() {
-  socket.emit("player:input", state.input);
-}
-
 function worldToScreen(x, y) {
   return {
     x: x - state.camera.x,
@@ -231,18 +168,79 @@ function worldToScreen(x, y) {
   };
 }
 
-function updateCamera() {
+function updateLocalPlayer(delta) {
   const self = selfPlayer();
   if (!self) return;
-  const selfRender = getRenderPlayer(self);
+
+  if (!state.selfRender) {
+    state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
+  }
+
+  const inputX = Number(state.input.right) - Number(state.input.left);
+  const inputY = Number(state.input.down) - Number(state.input.up);
+  const magnitude = Math.hypot(inputX, inputY) || 1;
+
+  if (inputX !== 0 || inputY !== 0) {
+    self.vx = (inputX / magnitude) * self.speed;
+    self.vy = (inputY / magnitude) * self.speed;
+  } else {
+    self.vx = 0;
+    self.vy = 0;
+  }
+
+  state.selfRender.x = Math.max(30, Math.min(state.map.width - 30, state.selfRender.x + self.vx * delta));
+  state.selfRender.y = Math.max(30, Math.min(state.map.height - 30, state.selfRender.y + self.vy * delta));
+  state.selfRender.bob += delta * ((self.vx || self.vy) ? 8 : 3);
+
+  self.x = state.selfRender.x;
+  self.y = state.selfRender.y;
+}
+
+function updateRemoteEntities(delta) {
+  state.players.forEach((player) => {
+    if (player.id === state.selfId) return;
+    const render = getRemotePlayerRender(player);
+    render.x += (player.x - render.x) * POSITION_LERP;
+    render.y += (player.y - render.y) * POSITION_LERP;
+    render.bob += delta * ((player.vx || player.vy) ? 8 : 3);
+  });
+
+  state.enemies.forEach((enemy) => {
+    const render = getEnemyRender(enemy);
+    render.x += (enemy.x - render.x) * POSITION_LERP;
+    render.y += (enemy.y - render.y) * POSITION_LERP;
+    render.bob += delta * 7;
+  });
+}
+
+function sendMovement(force = false) {
+  const self = selfPlayer();
+  if (!state.ready || !state.selfRender || !self) return;
+
+  const now = performance.now();
+  if (!force && now - state.lastMoveSentAt < MOVE_SEND_INTERVAL) return;
+  state.lastMoveSentAt = now;
+
+  socket.emit("player:move", {
+    x: state.selfRender.x,
+    y: state.selfRender.y,
+    vx: self.vx || 0,
+    vy: self.vy || 0,
+  });
+}
+
+function updateCamera() {
+  if (!state.selfRender) return;
+
   const targetX = Math.max(
     0,
-    Math.min(selfRender.x - canvas.clientWidth / 2, state.map.width - canvas.clientWidth),
+    Math.min(state.selfRender.x - canvas.clientWidth / 2, state.map.width - canvas.clientWidth),
   );
   const targetY = Math.max(
     0,
-    Math.min(selfRender.y - canvas.clientHeight / 2, state.map.height - canvas.clientHeight),
+    Math.min(state.selfRender.y - canvas.clientHeight / 2, state.map.height - canvas.clientHeight),
   );
+
   state.camera.x += (targetX - state.camera.x) * CAMERA_LERP;
   state.camera.y += (targetY - state.camera.y) * CAMERA_LERP;
 }
@@ -259,12 +257,14 @@ function drawBackground() {
   const gridSize = 80;
   ctx.strokeStyle = "rgba(24, 33, 38, 0.06)";
   ctx.lineWidth = 1;
+
   for (let x = -(state.camera.x % gridSize); x < canvas.clientWidth; x += gridSize) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, canvas.clientHeight);
     ctx.stroke();
   }
+
   for (let y = -(state.camera.y % gridSize); y < canvas.clientHeight; y += gridSize) {
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -312,9 +312,10 @@ function drawMine() {
 }
 
 function drawEnemy(enemy) {
-  const renderEnemy = getRenderEnemy(enemy);
-  const pos = worldToScreen(renderEnemy.x, renderEnemy.y);
-  const bobOffset = Math.sin(renderEnemy.bob) * 2.4;
+  const render = getEnemyRender(enemy);
+  const pos = worldToScreen(render.x, render.y);
+  const bobOffset = Math.sin(render.bob) * 2.4;
+
   ctx.fillStyle = "#c44536";
   ctx.beginPath();
   ctx.arc(pos.x, pos.y + bobOffset, enemy.radius, 0, Math.PI * 2);
@@ -331,10 +332,12 @@ function drawEnemy(enemy) {
 }
 
 function drawPlayer(player) {
-  const renderPlayer = getRenderPlayer(player);
-  const pos = worldToScreen(renderPlayer.x, renderPlayer.y);
-  const self = player.id === state.selfId;
-  const bobOffset = Math.sin(renderPlayer.bob) * (self ? 2.2 : 1.6);
+  const isSelf = player.id === state.selfId;
+  const render = isSelf ? state.selfRender : getRemotePlayerRender(player);
+  if (!render) return;
+
+  const pos = worldToScreen(render.x, render.y);
+  const bobOffset = Math.sin(render.bob) * (isSelf ? 2.2 : 1.6);
 
   ctx.fillStyle = player.appearance.body;
   ctx.beginPath();
@@ -383,9 +386,9 @@ function drawHints() {
   const self = selfPlayer();
   if (!self) return;
 
-  const nearMine =
-    Math.hypot(self.x - state.mineNode.x, self.y - state.mineNode.y) < state.mineNode.radius + 40;
+  const nearMine = Math.hypot(self.x - state.mineNode.x, self.y - state.mineNode.y) < state.mineNode.radius + 40;
   const inTown = Math.hypot(self.x - state.town.x, self.y - state.town.y) < state.town.radius;
+
   ctx.fillStyle = "rgba(255, 250, 240, 0.88)";
   ctx.fillRect(18, canvas.clientHeight - 74, 340, 46);
   ctx.fillStyle = "#182126";
@@ -404,7 +407,9 @@ function drawHints() {
 function render(now = performance.now()) {
   const delta = Math.min(0.033, (now - state.lastFrameAt) / 1000 || 0.016);
   state.lastFrameAt = now;
-  updateRenderState(delta);
+
+  updateLocalPlayer(delta);
+  updateRemoteEntities(delta);
   updateCamera();
   drawBackground();
   drawTown();
@@ -413,12 +418,7 @@ function render(now = performance.now()) {
   state.players.forEach(drawPlayer);
   drawHints();
 
-  if (performance.now() - state.lastToastAt > 2200) {
-    refs.toast.style.opacity = "0";
-  } else {
-    refs.toast.style.opacity = "1";
-  }
-
+  refs.toast.style.opacity = performance.now() - state.lastToastAt > 2200 ? "0" : "1";
   requestAnimationFrame(render);
 }
 
@@ -460,18 +460,19 @@ document.querySelectorAll("[data-shop]").forEach((button) => {
 window.addEventListener("resize", resizeCanvas);
 
 window.addEventListener("keydown", (event) => {
-  if (["INPUT"].includes(document.activeElement.tagName)) return;
+  if (document.activeElement.tagName === "INPUT") return;
   if (event.repeat && event.code !== "Space") return;
 
   if (event.code === "KeyW") state.input.up = true;
   if (event.code === "KeyS") state.input.down = true;
   if (event.code === "KeyA") state.input.left = true;
   if (event.code === "KeyD") state.input.right = true;
-  if (event.code.startsWith("Key")) sendInput();
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) sendMovement(true);
 
   if (event.code === "KeyE") {
     socket.emit("player:interact");
   }
+
   if (event.code === "Space") {
     event.preventDefault();
     socket.emit("player:attack");
@@ -483,7 +484,7 @@ window.addEventListener("keyup", (event) => {
   if (event.code === "KeyS") state.input.down = false;
   if (event.code === "KeyA") state.input.left = false;
   if (event.code === "KeyD") state.input.right = false;
-  if (event.code.startsWith("Key")) sendInput();
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) sendMovement(true);
 });
 
 window.addEventListener("blur", () => {
@@ -491,17 +492,22 @@ window.addEventListener("blur", () => {
   state.input.down = false;
   state.input.left = false;
   state.input.right = false;
-  if (state.ready) {
-    sendInput();
+
+  const self = selfPlayer();
+  if (self) {
+    self.vx = 0;
+    self.vy = 0;
   }
+
+  sendMovement(true);
 });
 
 socket.on("connect", () => {
   showToast("Подключено к серверу.");
   state.ready = false;
-  state.initSent = false;
   state.selfId = null;
   state.selfRender = null;
+  state.lastMoveSentAt = 0;
   if (state.pendingJoinCode) {
     sendInit();
   }
@@ -526,16 +532,23 @@ socket.on("state", (payload) => {
   state.players = payload.players;
   state.enemies = payload.enemies;
   pruneRenderState();
+
   const self = selfPlayer();
-  if (self && !state.selfRender) {
-    state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
+  if (self) {
+    if (!state.selfRender) {
+      state.selfRender = { x: self.x, y: self.y, bob: Math.random() * Math.PI * 2 };
+    }
+    self.x = state.selfRender.x;
+    self.y = state.selfRender.y;
   }
+
   if (state.lobby?.code && state.lastUrlLobbyCode !== state.lobby.code) {
     const url = new URL(window.location.href);
     url.searchParams.set("lobby", state.lobby.code);
     window.history.replaceState({}, "", url);
     state.lastUrlLobbyCode = state.lobby.code;
   }
+
   updateHud();
 });
 

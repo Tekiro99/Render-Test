@@ -7,7 +7,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
-const SIMULATION_TICK_RATE = 1000 / 30;
+const SIMULATION_TICK_RATE = 1000 / 20;
 const SNAPSHOT_TICK_RATE = 1000 / 12;
 const MAP = { width: 3200, height: 2200 };
 const TOWN = { x: 360, y: 360, radius: 260 };
@@ -81,6 +81,7 @@ function createPlayer(socket, payload = {}) {
       left: false,
       right: false,
     },
+    lastMoveAt: Date.now(),
   };
 }
 
@@ -306,21 +307,15 @@ function tryAttack(player, code) {
 
 function updatePlayers(delta) {
   for (const player of players.values()) {
-    const moveX = Number(player.input.right) - Number(player.input.left);
-    const moveY = Number(player.input.down) - Number(player.input.up);
-    const magnitude = Math.max(1, length(moveX, moveY));
-
-    player.vx = (moveX / magnitude) * player.speed;
-    player.vy = (moveY / magnitude) * player.speed;
-
-    player.x = clamp(player.x + player.vx * delta, 30, MAP.width - 30);
-    player.y = clamp(player.y + player.vy * delta, 30, MAP.height - 30);
-
     if (player.attackCooldown > 0) {
       player.attackCooldown = Math.max(0, player.attackCooldown - delta);
     }
     if (player.interactCooldown > 0) {
       player.interactCooldown = Math.max(0, player.interactCooldown - delta);
+    }
+    if (Date.now() - player.lastMoveAt > 180) {
+      player.vx = 0;
+      player.vy = 0;
     }
   }
 }
@@ -442,15 +437,22 @@ io.on("connection", (socket) => {
     io.to(code).emit("messages", result.lobby.messages);
   });
 
-  socket.on("player:input", (input) => {
+  socket.on("player:move", (payload) => {
     const player = players.get(socket.id);
     if (!player) return;
-    player.input = {
-      up: Boolean(input?.up),
-      down: Boolean(input?.down),
-      left: Boolean(input?.left),
-      right: Boolean(input?.right),
-    };
+
+    const nextX = Number(payload?.x);
+    const nextY = Number(payload?.y);
+    const nextVx = Number(payload?.vx) || 0;
+    const nextVy = Number(payload?.vy) || 0;
+
+    if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return;
+
+    player.x = clamp(nextX, 30, MAP.width - 30);
+    player.y = clamp(nextY, 30, MAP.height - 30);
+    player.vx = clamp(nextVx, -PLAYER_SPEED, PLAYER_SPEED);
+    player.vy = clamp(nextVy, -PLAYER_SPEED, PLAYER_SPEED);
+    player.lastMoveAt = Date.now();
   });
 
   socket.on("player:interact", () => {
