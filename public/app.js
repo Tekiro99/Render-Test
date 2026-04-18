@@ -26,7 +26,7 @@
 
     keys: {},
     mouse: { x: 0, y: 0, down: false },
-    lastAim: { x: 1, y: 0 },
+    facingAngle: 0,
     lastInputSent: 0,
 
     camera: { x: 0, y: 0, shake: 0 },
@@ -56,6 +56,8 @@
     KeyB: "shop",
     KeyH: "help",
     Space: "attack",
+    ShiftLeft: "sprint",
+    ShiftRight: "sprint",
   };
   const KEY_FALLBACK_MAP = {
     w: "move_up",
@@ -81,6 +83,7 @@
     h: "help",
     р: "help",
     " ": "attack",
+    shift: "sprint",
   };
 
   function showScreen(id) {
@@ -218,9 +221,19 @@
     const dx = S.mouse.x - cx, dy = S.mouse.y - cy;
     const m = Math.hypot(dx, dy);
     const deadzone = Math.max(1, S.self?.radius || findSelfInSnapshot()?.radius || 20);
-    if (m <= deadzone) return S.lastAim;
-    S.lastAim = { x: dx / m, y: dy / m };
-    return S.lastAim;
+    const facing = getFacingAngle();
+    if (m <= deadzone) return { x: Math.cos(facing), y: Math.sin(facing) };
+    S.facingAngle = Math.atan2(dy, dx);
+    return { x: dx / m, y: dy / m };
+  }
+  function getFacingAngle() {
+    if (Number.isFinite(S.facingAngle)) return S.facingAngle;
+    const selfSnap = findSelfInSnapshot();
+    if (selfSnap && Number.isFinite(selfSnap.facing)) {
+      S.facingAngle = selfSnap.facing;
+      return selfSnap.facing;
+    }
+    return S.facingAngle;
   }
   function doAttack() { if (S.inLobby) socket.emit("player:attack", getAim()); }
   function doAbility() { if (S.inLobby) socket.emit("player:ability", getAim()); }
@@ -269,7 +282,7 @@
     // initialize pos once from server
     if (!S._posInit) {
       const me = snap.players.find((p) => p.id === S.selfId);
-      if (me) { S.pos.x = me.x; S.pos.y = me.y; S._posInit = true; }
+      if (me) { S.pos.x = me.x; S.pos.y = me.y; S.facingAngle = me.facing || 0; S._posInit = true; }
     }
   });
   socket.on("self", (self) => { S.self = self; });
@@ -323,7 +336,8 @@
     lastUpdate = now;
 
     if (S.inLobby && S.self) {
-      const speed = S.self.speed || 220;
+      const baseSpeed = S.self.speed || 220;
+      const speed = S.keys.sprint ? baseSpeed * 1.55 : baseSpeed;
       let ix = 0, iy = 0;
       if (S.keys.move_up) iy -= 1;
       if (S.keys.move_down) iy += 1;
@@ -346,7 +360,8 @@
       }
       if (now - S.lastInputSent > 45) {
         const aim = getAim();
-        socket.emit("player:input", { x: S.pos.x, y: S.pos.y, vx: S.vel.x, vy: S.vel.y, facing: Math.atan2(aim.y, aim.x) });
+        S.facingAngle = Math.atan2(aim.y, aim.x);
+        socket.emit("player:input", { x: S.pos.x, y: S.pos.y, vx: S.vel.x, vy: S.vel.y, facing: S.facingAngle });
         S.lastInputSent = now;
       }
     }
@@ -533,12 +548,20 @@
     ctx.restore();
     ctx.restore();
 
-    const bw = 40, bh = 5;
+    const bw = 46, bh = 6;
     const pct = Math.max(0, Math.min(1, p.hp / p.maxHp));
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(p.x - bw / 2, p.y - r - 18, bw, bh);
-    ctx.fillStyle = pct > 0.4 ? "#6be06e" : pct > 0.2 ? "#ffb347" : "#ff5772";
-    ctx.fillRect(p.x - bw / 2, p.y - r - 18, bw * pct, bh);
+    const barX = p.x - bw / 2;
+    const barY = p.y - r - 19;
+    ctx.fillStyle = "rgba(5,10,18,0.82)";
+    ctx.fillRect(barX, barY, bw, bh);
+    const hpGrad = ctx.createLinearGradient(barX, barY, barX + bw, barY);
+    hpGrad.addColorStop(0, pct > 0.4 ? "#4fe37b" : pct > 0.2 ? "#ffb347" : "#ff6b6b");
+    hpGrad.addColorStop(1, pct > 0.4 ? "#c7ff72" : pct > 0.2 ? "#ffd166" : "#ff8f70");
+    ctx.fillStyle = hpGrad;
+    ctx.fillRect(barX, barY, bw * pct, bh);
+    ctx.strokeStyle = isSelf ? "rgba(255,207,107,0.85)" : "rgba(255,255,255,0.2)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX - 0.5, barY - 0.5, bw + 1, bh + 1);
 
     ctx.font = "11px Inter, sans-serif"; ctx.textAlign = "center";
     ctx.fillStyle = isSelf ? "#ffcf6b" : "#e6e9f2";
@@ -732,7 +755,7 @@
     const xpPct = (self.xp / self.xpNeeded) * 100;
     $("#xpFill").style.width = xpPct + "%";
     $("#xpText").textContent = `${self.xp}/${self.xpNeeded}`;
-    $("#coinsVal").textContent = self.coins;
+    $("#coinsVal").textContent = `${Math.round(self.coins).toLocaleString("ru-RU")} ${S.keys.sprint ? "• СПРИНТ" : ""}`;
 
     $("#skillAtk .cd").style.transform = `scaleY(${Math.min(1, self.attackTimer / self.attackCd)})`;
     $("#skillAbl .cd").style.transform = `scaleY(${Math.min(1, self.abilityTimer / self.abilityCd)})`;

@@ -34,7 +34,7 @@ const CLASSES = {
   warrior: {
     name: "Воин",
     maxHp: 160,
-    speed: 205,
+    speed: 235,
     damage: 24,
     attackCd: 0.5,
     range: 90,
@@ -46,7 +46,7 @@ const CLASSES = {
   mage: {
     name: "Маг",
     maxHp: 95,
-    speed: 205,
+    speed: 228,
     damage: 20,
     attackCd: 0.42,
     range: 600,
@@ -59,7 +59,7 @@ const CLASSES = {
   rogue: {
     name: "Плут",
     maxHp: 105,
-    speed: 290,
+    speed: 320,
     damage: 13,
     attackCd: 0.22,
     range: 70,
