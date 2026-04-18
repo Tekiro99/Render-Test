@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Popscoin Realm</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="panel left-panel">
+        <div class="brand">
+          <p class="eyebrow">Realtime Multiplayer</p>
+          <h1>Popscoin Realm</h1>
+        </div>
+
+        <section class="card">
+          <h2>Персонаж</h2>
+          <label>Имя <input id="nameInput" maxlength="18" value="Игрок" /></label>
+          <div class="editor-grid">
+            <label>Тело <input id="bodyColor" type="color" value="#f0efe9" /></label>
+            <label>Акцент <input id="accentColor" type="color" value="#2a9d8f" /></label>
+            <label>Глаза <input id="eyesColor" type="color" value="#1d3557" /></label>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Лобби</h2>
+          <button id="createLobbyBtn">Создать лобби</button>
+          <div class="join-row">
+            <input id="joinLobbyInput" maxlength="8" placeholder="Код лобби" />
+            <button id="joinLobbyBtn">Войти</button>
+          </div>
+          <p class="muted" id="lobbyInfo">Сначала создай лобби или войди по коду.</p>
+          <button id="copyInviteBtn" class="ghost">Копировать приглашение</button>
+        </section>
+
+        <section class="card">
+          <h2>Магазин</h2>
+          <button data-shop="pickaxe">Кирка · 40</button>
+          <button data-shop="sword">Меч · 55</button>
+          <p class="muted">Покупки доступны в городе.</p>
+        </section>
+
+        <section class="card">
+          <h2>Управление</h2>
+          <p class="muted">WASD: движение</p>
+          <p class="muted">E: взаимодействие</p>
+          <p class="muted">Space: атака</p>
+        </section>
+      </aside>
+
+      <main class="game-wrap">
+        <div class="hud">
+          <div class="pill"><span>HP</span><strong id="hpValue">100 / 100</strong></div>
+          <div class="pill"><span>Попскойны</span><strong id="coinsValue">0</strong></div>
+          <div class="pill"><span>Игроки</span><strong id="playersValue">0</strong></div>
+        </div>
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div class="toast" id="toast">Подключение...</div>
+      </main>
+
+      <aside class="panel right-panel">
+        <section class="card">
+          <h2>События</h2>
+          <div id="messages" class="messages"></div>
+        </section>
+      </aside>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+  </html>
